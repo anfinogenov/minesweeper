@@ -166,7 +166,8 @@ void log_open (void) {
     char* log_name = new char[30];
     sprintf(log_name, "log-%lu.txt", time(nullptr));
     file_log.open(log_name);
-    log_out("", 's');   
+    log_out("", 's');
+    delete[] log_name;
 }
 
 void log_out (const std::string & msg, char msgType) {
