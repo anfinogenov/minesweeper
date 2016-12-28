@@ -11,8 +11,8 @@ const uint8_t width = 20;
 const uint8_t height = 10;
 const uint8_t mines = 10; //1 mine in 6 cells
 bool exitFlag = false;
-char secret_field[width][height] = {0};
-char open_field[width][height] = {0};
+chtype secret_field[width][height] = {0};
+chtype open_field[width][height] = {0};
 
 int generate_secret(void);
 void open_cell (const int x, const int y);
@@ -50,6 +50,12 @@ int main(/*int argc, char *argv[]*/) {
                 for (uint8_t j = 0; j < height; j++)
                     if (open_field[i][j] == 'm')
                         exitFlag &= secret_field[i][j] == 'x';
+            if (exitFlag) {
+                mvprintw(height/2, width/2-5, " you win! ");
+                refresh();
+                napms(5000);
+                exit_s("win", 'n');
+            }
         }
         mvprintw(height, 0, "total mines: %d   detected mines: %d  ", total_mines, detected_mines);
         move(pointer.h, pointer.w);
@@ -146,7 +152,7 @@ void open_cell (const int x, const int y) {
                             open_cell(x+i, y+j);
                         }
     } else if (secret_field[x][y] == 'x') {
-        mvprintw(height/2, width/2-10, "you\'ve opened a mine!");
+        mvprintw(height/2, width/2-11, " you\'ve opened a mine! ");
         refresh();
         napms(5000);
         exit_s("mine", 'n');
