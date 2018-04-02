@@ -2,7 +2,6 @@
 #include <fstream>
 #include <ctime>
 #include <cstring>
-#include <thread>
 #include <cstdint>
 #include <ncurses.h>
 
@@ -11,8 +10,8 @@ const uint8_t width = 20;
 const uint8_t height = 10;
 const uint8_t mines = 10; //1 mine in 6 cells
 bool exitFlag = false;
-chtype secret_field[width][height] = {0};
-chtype open_field[width][height] = {0};
+chtype secret_field[width][height] = {};
+chtype open_field[width][height] = {};
 
 int generate_secret(void);
 void open_cell (const int x, const int y);
@@ -21,20 +20,20 @@ void screen_init_s (void);
 void log_out (const std::string & msg, char msg_type);
 void exit_s (const std::string & msg, char msg_type);
 
-struct cursor {
+typedef struct {
     int16_t w;
     int16_t h;
-};
+} Cursor;
 
 std::ofstream file_log;
 
 int main(/*int argc, char *argv[]*/) {
-    srand((time(nullptr) - clock())*21920);
+    srand((time(nullptr) - clock())*21920); // some kind of less-predicted random lol
     log_open();
     screen_init_s();
     int total_mines = generate_secret();
 
-    cursor pointer{0,0};
+    Cursor pointer = {0,0};
 
     int key;
     while (!exitFlag) {
@@ -49,7 +48,7 @@ int main(/*int argc, char *argv[]*/) {
             for (uint8_t i = 0; i < width; i++)
                 for (uint8_t j = 0; j < height; j++)
                     if (open_field[i][j] == 'm')
-                        exitFlag &= secret_field[i][j] == 'x';
+                        exitFlag &= secret_field[i][j] == 'x'; // if all m's contains mine
             if (exitFlag) {
                 mvprintw(height/2, width/2-5, " you win! ");
                 refresh();
@@ -99,6 +98,46 @@ int main(/*int argc, char *argv[]*/) {
     return 0;
 }
 
+int amount_of_mines_around (int coordinate_x, int coordinate_y) {
+    int amount = 0;
+
+    /* ↓ y; → x
+     * [1][2][3]
+     * [4][ ][6]
+     * [7][8][9]
+     */
+
+    if (coordinate_x != 0 &&
+        coordinate_y != 0 &&
+        secret_field[coordinate_x-1][coordinate_y-1] == 'x') amount++; // 1
+
+    if (coordinate_y != 0 &&
+        secret_field[coordinate_x][coordinate_y-1] == 'x') amount++; // 2
+
+    if (coordinate_x != width-1 &&
+        coordinate_y != 0 &&
+        secret_field[coordinate_x+1][coordinate_y-1] == 'x') amount++; // 3
+
+    if (coordinate_x != 0 &&
+        secret_field[coordinate_x-1][coordinate_y] == 'x') amount++; // 4
+
+    if (coordinate_x != width-1 &&
+        secret_field[coordinate_x+1][coordinate_y] == 'x') amount++; // 6
+
+    if (coordinate_x != 0 &&
+        coordinate_y != height-1 &&
+        secret_field[coordinate_x-1][coordinate_y+1] == 'x') amount++; // 7
+
+    if (coordinate_y != height-1 &&
+        secret_field[coordinate_x][coordinate_y+1] == 'x') amount++; // 8
+
+    if (coordinate_x != width-1 &&
+        coordinate_y != height-1 &&
+        secret_field[coordinate_x+1][coordinate_y+1] == 'x') amount++; // 9
+
+    return amount;
+}
+
 int generate_secret (void) {
     int total_mines = 0;
     for (uint8_t i = 0; i < width; i++)
@@ -116,20 +155,7 @@ int generate_secret (void) {
     for (uint8_t i = 0; i < width; i++) {
         for (uint8_t j = 0; j < height; j++) {
             if (secret_field[i][j] == 'x') continue;
-            int amount = 0;
-
-            if (i != 0 && j != 0 && secret_field[i-1][j-1] == 'x') amount++;
-            if (j != 0 && secret_field[i][j-1] == 'x') amount++;
-            if (i != width-1 && j != 0 && secret_field[i+1][j-1] == 'x') amount++;
-
-            if (i != 0 && secret_field[i-1][j] == 'x') amount++;
-            if (i != width-1 && secret_field[i+1][j] == 'x') amount++;
-
-            if (i != 0 && j != height-1 && secret_field[i-1][j+1] == 'x') amount++;
-            if (j != height-1 && secret_field[i][j+1] == 'x') amount++;
-            if (i != width-1 && j != height-1 && secret_field[i+1][j+1] == 'x') amount++;
-
-
+            int amount = amount_of_mines_around(i, j);
             secret_field[i][j] = amount + '0';
         }
     }
@@ -142,17 +168,20 @@ void open_cell (const int x, const int y) {
         return;
     }
     if (secret_field[x][y] == '0') {
-        open_field[x][y] = ' ';
-        for (int i = -1; i < 2; i++)
-            for (int j = -1; j < 2; j++)
-                if (x+i >= 0 && x+i < width)
-                    if (y+j >= 0 && y+j < height)
-                        if (x+i != x || y+j != y) {
-                            secret_field[x][y] = ' ';
-                            open_cell(x+i, y+j);
-                        }
+        open_field[x][y] = ' '; // recursively open connected empty space
+        for (int i = -1; i <= 1; i++)
+            for (int j = -1; j <= 1; j++)
+                if (x+i >= 0 && // if we are not behind the left border
+                    x+i < width && // and not behind the right border
+                    y+j >= 0 && // and not behind the upper edge
+                    y+j < height && // and didn't broke our floor
+                    (x+i != x || y+j != y)) // and if we aren't rotating on place, then:
+                {
+                    secret_field[x][y] = ' ';
+                    open_cell(x+i, y+j);
+                }
     } else if (secret_field[x][y] == 'x') {
-        mvprintw(height/2, width/2-11, " you\'ve opened a mine! ");
+        mvprintw(height/2, width/2-11, " you've opened a mine! ");
         refresh();
         napms(5000);
         exit_s("mine", 'n');
@@ -171,7 +200,7 @@ void log_open (void) {
 }
 
 void log_out (const std::string & msg, char msgType) {
-    static char msg_type[5];
+    char msg_type[5];
     switch (msgType) { //converting char msgType to string
         case 'n':
             strcpy(msg_type, "okay");
