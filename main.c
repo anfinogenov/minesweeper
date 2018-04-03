@@ -1,35 +1,38 @@
-#include <iostream>
-#include <fstream>
-#include <ctime>
-#include <cstring>
-#include <cstdint>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <ctype.h>
+#include <string.h>
+#include <stdint.h>
 #include <ncurses.h>
 
-const uint64_t startTime = time(nullptr);
-const uint8_t width = 20;
-const uint8_t height = 10;
+#define FIELD_FLAG 'F'
+#define FIELD_MINE 'x'
+#define FIELD_NOT_OPENED '.'
+#define FIELD_SPACE ' '
+
+enum Color { ONE='1', TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, FLAG=FIELD_FLAG, CLOSED=FIELD_NOT_OPENED, EMPTY=FIELD_SPACE};
+
+const uint8_t width = 60; // TODO: parse settings from commandline
+const uint8_t height = 15;
 const uint8_t mines = 10; //1 mine in 6 cells
 bool exitFlag = false;
-chtype secret_field[width][height] = {};
-chtype open_field[width][height] = {};
+chtype **secret_field = NULL;
+chtype **open_field = NULL;
 
 int generate_secret(void);
 void open_cell (const int x, const int y);
 void log_open (void);
 void screen_init_s (void);
-void log_out (const std::string & msg, char msg_type);
-void exit_s (const std::string & msg, char msg_type);
+void exit_s (const char* msg, int exit_code);
 
 typedef struct {
     int16_t w;
     int16_t h;
 } Cursor;
 
-std::ofstream file_log;
-
 int main(/*int argc, char *argv[]*/) {
-    srand((time(nullptr) - clock())*21920); // some kind of less-predicted random lol
-    log_open();
+    srand((time(NULL) - clock())*21920); // some kind of less-predicted random lol
     screen_init_s();
     int total_mines = generate_secret();
 
@@ -40,27 +43,28 @@ int main(/*int argc, char *argv[]*/) {
         int detected_mines = 0;
         for (uint8_t i = 0; i < width; i++)
             for (uint8_t j = 0; j < height; j++) {
+                attron(COLOR_PAIR(open_field[i][j]));
                 mvaddch(j, i, open_field[i][j]);
-                if (open_field[i][j] == 'm') detected_mines++;
+                attron(COLOR_PAIR(0));
+                if (open_field[i][j] == FIELD_FLAG) detected_mines++;
             }
         if (detected_mines == total_mines) {
             exitFlag = true;
             for (uint8_t i = 0; i < width; i++)
                 for (uint8_t j = 0; j < height; j++)
-                    if (open_field[i][j] == 'm')
-                        exitFlag &= secret_field[i][j] == 'x'; // if all m's contains mine
+                    if (open_field[i][j] == FIELD_FLAG)
+                        exitFlag &= secret_field[i][j] == FIELD_MINE; // if all m's contains mine
             if (exitFlag) {
                 mvprintw(height/2, width/2-5, " you win! ");
                 refresh();
                 napms(5000);
-                exit_s("win", 'n');
+                exit_s("Win!", 0);
             }
         }
         mvprintw(height, 0, "total mines: %d   detected mines: %d  ", total_mines, detected_mines);
         move(pointer.h, pointer.w);
 
         key = tolower(getch());
-        if (tolower(key) == 'q') exitFlag = true;
         switch (key) {
             case KEY_RIGHT:
             case 'd':
@@ -84,7 +88,11 @@ int main(/*int argc, char *argv[]*/) {
                 open_cell(pointer.w, pointer.h);
                 break;
             case 'm':
-                open_field[pointer.w][pointer.h] = 'm';
+            case 'f':
+                open_field[pointer.w][pointer.h] = FIELD_FLAG;
+                break;
+            case 'q':
+                exitFlag = true;
                 break;
             default: break;
         }
@@ -94,7 +102,7 @@ int main(/*int argc, char *argv[]*/) {
     }
     refresh();
     endwin();
-    exit_s("returning 0", 'n');
+    exit_s("Pressed Q", 0);
     return 0;
 }
 
@@ -142,19 +150,19 @@ int generate_secret (void) {
     int total_mines = 0;
     for (uint8_t i = 0; i < width; i++)
         for (uint8_t j = 0; j < height; j++)
-            open_field[i][j] = '_';
+            open_field[i][j] = FIELD_NOT_OPENED;
 
     for (uint8_t i = 0; i < width; i++)
         for (uint8_t j = 0; j < height; j++) {
             if(!(rand()%mines)) {
-                secret_field[i][j] = 'x';
+                secret_field[i][j] = FIELD_MINE;
                 total_mines++;
-            } else secret_field[i][j] = ' ';
+            } else secret_field[i][j] = FIELD_SPACE;
         }
 
     for (uint8_t i = 0; i < width; i++) {
         for (uint8_t j = 0; j < height; j++) {
-            if (secret_field[i][j] == 'x') continue;
+            if (secret_field[i][j] == FIELD_MINE) continue;
             int amount = amount_of_mines_around(i, j);
             secret_field[i][j] = amount + '0';
         }
@@ -163,12 +171,12 @@ int generate_secret (void) {
 }
 
 void open_cell (const int x, const int y) {
-    if (open_field[x][y] == 'm') {
-        open_field[x][y] = ' ';
+    if (open_field[x][y] == FIELD_FLAG) {
+        open_field[x][y] = FIELD_SPACE;
         return;
     }
     if (secret_field[x][y] == '0') {
-        open_field[x][y] = ' '; // recursively open connected empty space
+        open_field[x][y] = FIELD_SPACE; // recursively open connected empty space
         for (int i = -1; i <= 1; i++)
             for (int j = -1; j <= 1; j++)
                 if (x+i >= 0 && // if we are not behind the left border
@@ -177,73 +185,66 @@ void open_cell (const int x, const int y) {
                     y+j < height && // and didn't broke our floor
                     (x+i != x || y+j != y)) // and if we aren't rotating on place, then:
                 {
-                    secret_field[x][y] = ' ';
+                    secret_field[x][y] = FIELD_SPACE;
                     open_cell(x+i, y+j);
                 }
-    } else if (secret_field[x][y] == 'x') {
-        mvprintw(height/2, width/2-11, " you've opened a mine! ");
+    } else if (secret_field[x][y] == FIELD_MINE) {
+        mvprintw(height/2, width/2-11,   " you've opened a mine! ");
+        mvprintw(height/2+2, width/2-11, "    Press Q to exit    ");
         refresh();
-        napms(5000);
-        exit_s("mine", 'n');
+        while (tolower(getch()) != 'q');
+        exit_s("Mine opened", 0);
     } else {
         open_field[x][y] = secret_field[x][y];
     }
     return;
 }
 
-void log_open (void) {
-    char* log_name = new char[30];
-    sprintf(log_name, "log-%lu.txt", time(nullptr));
-    file_log.open(log_name);
-    log_out("", 's');
-    delete[] log_name;
-}
-
-void log_out (const std::string & msg, char msgType) {
-    char msg_type[5];
-    switch (msgType) { //converting char msgType to string
-        case 'n':
-            strcpy(msg_type, "okay");
-            break;
-        case 'w':
-            strcpy(msg_type, "warn");
-            break;
-        case 'e':
-            strcpy(msg_type, "err ");
-            break;
-        case 'q':
-            file_log << "-- END OF LOG --" << std::endl;
-            return;
-        case 's':
-            file_log << "-- START OF LOG --" << std::endl;
-            return;
-        default:
-            strcpy(msg_type, "unkn");
-            break;
-    }
-    file_log.width(0);
-    file_log << msg_type << " [";
-    file_log.width(4);
-    file_log.fill('0');
-    file_log << (time(nullptr) - startTime);
-    file_log.width(0);
-    file_log << "]: " << msg << std::endl;
-    //out message with msgType and time from start
-}
-
 void screen_init_s (void) {
-    if(!initscr()) exit_s((char*)"initscr() failed", 'e');
-    log_out("initscr executed normally", 'n');
+    if(!initscr()) exit_s("initscr() failed", 1);
+
+    if (!has_colors()) {
+        exit_s("Your terminal does not support color", 2);
+    }
+
+    start_color();
+    int bg = COLOR_WHITE;
+    init_pair(ONE, COLOR_CYAN, bg);
+    init_pair(TWO, COLOR_GREEN, bg);
+    init_pair(THREE, COLOR_RED, bg);
+    init_pair(FOUR, COLOR_BLUE, bg);
+    init_pair(FIVE, COLOR_YELLOW, bg);
+    init_pair(SIX, COLOR_RED, bg);
+    init_pair(SEVEN, COLOR_MAGENTA, bg);
+    init_pair(EIGHT, COLOR_BLACK, bg);
+
+    init_pair(CLOSED, COLOR_WHITE, COLOR_BLACK);
+    init_pair(EMPTY, COLOR_WHITE, COLOR_WHITE);
+    init_pair(FLAG, COLOR_BLACK, COLOR_RED);
+
+    open_field = (chtype**)calloc(sizeof(chtype*), width);
+    secret_field = (chtype**)calloc(sizeof(chtype*), width);
+    for (int i = 0; i < width; i++) {
+        open_field[i] = (chtype*)calloc(sizeof(chtype), height);
+        secret_field[i] = (chtype*)calloc(sizeof(chtype), height);
+    }
+
     noecho();
     curs_set(1);
     keypad(stdscr, 1);
 }
 
-void exit_s (const std::string & msg, char msg_type) {
+void exit_s (const char* msg, int exit_code) {
+    for (int i = 0; i < width; i++) {
+        if (open_field != NULL) free(open_field[i]);
+        if (secret_field != NULL) free(secret_field[i]);
+    }
+    if (open_field != NULL) free(open_field);
+    if (secret_field != NULL) free(secret_field);
+
     endwin();
-    log_out(msg, msg_type);
-    log_out("", 'q');
-    file_log.close();
+    if (msg[0]) printf("%s\n", msg);
+
     //printf("\x1b[0m"); disables color
-    exit(1);
+    exit(exit_code);
 }
